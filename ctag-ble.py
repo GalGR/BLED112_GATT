@@ -425,10 +425,12 @@ def main():
     parser = init_parser()
     args = parser.parse_args(sys.argv[1:])
 
-    # Initialize the flags according to the command line arguments
-    do_scan = not (args.address != None and args.name == None)
-    manual_mode = not (args.address != None or args.name != None)
-    both_name_and_address = args.address != None and args.name != None
+    # Initialize the flags according from the command line arguments
+    avail_address = args.address != None
+    avail_name = args.name != None
+    do_scan = (not avail_address) or avail_name
+    manual_mode = (not avail_address) and (not avail_name)
+    verify_mode = avail_address and avail_name
 
     # Initialize the adapter according to the backend used
     adapter = None
@@ -477,17 +479,31 @@ def main():
             device_address = device_li[device_ind]["address"]
 
         else:
-            device_address = args.address[0]
-            if (both_name_and_address):
+            if (avail_name):
+                found = False
+                error_name = False
+                error_address = False
                 for d in device_li:
-                    if (d["address"] == args.address[0] and d["name"] != args.name[0]):
-                        print("Error: Found a device with that address but with a different name")
-                        return
-                    if (d["address"] != args.address[0] and d["name"] == args.name[0]):
-                        print("Error: Found a device with that name but with a different address")
-                        return
-                    if (d["address"] == args.address[0] and d["name"] == args.name[0]):
+                    if (verify_mode):
+                        if (d["address"] == args.address[0] and d["name"] != args.name[0]):
+                            error_name = True
+                            break
+                        if (d["address"] != args.address[0] and d["name"] == args.name[0]):
+                            error_address = True
+                            break
+                    if (d["name"] == args.name[0] and ((not verify_mode) or (verify_mode and d["address"] == args.address[0]))):
+                        device_address = d["address"]
+                        found = True
                         break
+                if (not found):
+                    print("Couldn't find the device")
+                    if (error_address):
+                        print("Warning: Found a device with that name but with a different address")
+                    if (error_name):
+                        print("Warning: Found a device with that address but with a different name")
+                    return
+            else:
+                device_address = args.address[0]
 
         # Initialize the main window
         global root
