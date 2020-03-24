@@ -65,6 +65,12 @@ def handle_my_char_data(handle, value):
     # ( leave hi nibble for something else: clicker_counter... )
     counter = int(value[13]) # use only 8 bits
     clicker_counter = int(value[12]) # use only 8 bits
+    
+    # print the "MSP Version" out of special info packet
+    if (digital == 0x3101):
+        if (analog[0] == 0x1965):
+            s = 'MSP Version: ' + repr(analog[2]) + '.' + repr(analog[3]) + '.' + repr(analog[4])
+            print(s)
 
     encoder1 = analog[3]
     encoder2 = analog[0]
