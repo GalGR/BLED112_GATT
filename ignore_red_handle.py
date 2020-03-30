@@ -24,6 +24,8 @@ MY_CHAR_UUID = "f0001143-0451-4000-b000-000000000000"
 MSP_CHAR1_UUID = "f0001141-0451-4000-b000-000000000000"
 MSP_CHAR2_UUID = "f0001142-0451-4000-b000-000000000000"
 MSP_CHAR3_UUID = "f0001143-0451-4000-b000-000000000000"
+# LED service to ignore the red handle fault
+LED_CHAR1_UUID = "f0001111-0451-4000-b000-000000000000"
 # device = None
 
 
@@ -660,11 +662,22 @@ def main():
         print("\nConnecting to the selected device...")
         device = adapter.connect(address=device_address)
         print("Connected successfully!\n")
+        
+        global LED_CHAR1_UUID
+        msp_1 = device.char_read(LED_CHAR1_UUID)
+        print( "device.char_read(LED_CHAR1_UUID):", str(msp_1[0]))
+        device.char_write(LED_CHAR1_UUID,bytearray([0x01]))
+        print("write to LED_CHAR1_UUID")
+        msp_1 = device.char_read(LED_CHAR1_UUID)
+        print( "device.char_read(LED_CHAR1_UUID):", str(msp_1[0]))
+        
 
-        # Subscribe to the wanted characteristic data
-        print("Subscribing to the characteristic with UUID %s..." % MY_CHAR_UUID)
-        device.subscribe(MY_CHAR_UUID, callback=handle_my_char_data)
-        print("Subscribed to the characteristic successfully!\n")
+
+
+        # # Subscribe to the wanted characteristic data
+        # print("Subscribing to the characteristic with UUID %s..." % MY_CHAR_UUID)
+        # device.subscribe(MY_CHAR_UUID, callback=handle_my_char_data)
+        # print("Subscribed to the characteristic successfully!\n")
 
         # Run the GUI main loop
         root.mainloop()

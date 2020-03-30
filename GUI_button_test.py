@@ -21,11 +21,6 @@ prev_int_outer_handle_channel1 = 0
 red_handle_ignore_val = 0
 
 MY_CHAR_UUID = "f0001143-0451-4000-b000-000000000000"
-MSP_CHAR1_UUID = "f0001141-0451-4000-b000-000000000000"
-MSP_CHAR2_UUID = "f0001142-0451-4000-b000-000000000000"
-MSP_CHAR3_UUID = "f0001143-0451-4000-b000-000000000000"
-# device = None
-
 
 OUTER_HANDLE_CHANNEL1_STYLE = "OuterHandleChannel1"
 OUTER_HANDLE_CHANNEL2_STYLE = "OuterHandleChannel2"
@@ -68,41 +63,11 @@ def toggle_val(value):
 
 def ignoreCallBack():
    global red_handle_ignore_val
-   global device
-   global MSP_CHAR1_UUID
-   global MY_CHAR_UUID
-   device.unsubscribe(MY_CHAR_UUID,False)
-   print("UN-Subscribed to the characteristic successfully!\n")
-   return
-   
-   try:
-        msp_1 = device.char_read(MSP_CHAR1_UUID)
-        print( "device.char_read(MSP_CHAR1_UUID):", "OK")
-        print( "msp_1 val:", str(msp_1[0]))
-        # red_handle_ignore_val = toggle_val(red_handle_ignore_val)
-        # checkbox_ignore_red = ignore_red
-        # update_checkbox(checkbox_ignore_red, red_handle_ignore_val)
-   except:
-        print("Invalid read MSP_CHAR1_UUID")
-   try:
-        device.char_write(MSP_CHAR1_UUID,bytearray([0x01]))
-        print("write to MSP_CHAR1_UUID")
-   except:
-        print("Invalid write to device")
-   try:
-        msp_1 = device.char_read(MSP_CHAR1_UUID)
-        # print( "ignoreCallBack:", "ignore red handle")
-        # print( "red_handle_ignore:", str(red_handle_ignore_val))
-        print( "read MSP_CHAR1_UUID after write", "OK")
-        print( "msp_1 val:", str(msp_1[0]))
-        red_handle_ignore_val = msp_1[0]
-        checkbox_ignore_red = ignore_red
-        update_checkbox(checkbox_ignore_red, red_handle_ignore_val)
-   except:
-        print("Invalid second read MSP_CHAR1_UUID")
-
-   device.subscribe(MY_CHAR_UUID, callback=handle_my_char_data)
-   print("Subscribe back to the characteristic successfully!\n")
+   print( "ignoreCallBack:", "ignore red handle")
+   print( "red_handle_ignore:", str(red_handle_ignore_val))
+   red_handle_ignore_val = toggle_val(red_handle_ignore_val)
+   checkbox_ignore_red = ignore_red
+   update_checkbox(checkbox_ignore_red, red_handle_ignore_val)
 
    
 
@@ -183,6 +148,7 @@ def handle_my_char_data(handle, value):
     checkbox_inner_clicker = inner_clicker
     checkbox_red_handle = red_handle
     checkbox_reset_check = reset_check
+    checkbox_red_handle_ignore_val = red_handle_ignore_val
     entry_counter = counter_entry
     entry_clicker_counter = clicker_counter_entry
 
@@ -218,6 +184,7 @@ def handle_my_char_data(handle, value):
     update_checkbox(checkbox_inner_clicker, bool_clicker)
     update_checkbox(checkbox_red_handle, bool_red_handle)
     update_checkbox(checkbox_reset_check, bool_reset)
+    update_checkbox(checkbox_red_handle_ignore_val, red_handle_ignore_val)
 
     entry_counter.delete(0, tk.END)
     entry_counter.insert(tk.END, "%d" % int_counter)
@@ -563,7 +530,6 @@ def init_parser():
     return parser
 
 def main():
-    global device
     # Parse the command line arguments
     parser = init_parser()
     args = parser.parse_args(sys.argv[1:])
@@ -584,70 +550,77 @@ def main():
 
     device = None
 
-    try:
-        # Connect to BLED112
-        adapter.start()
+    gui_only = 1
+    
+    if (gui_only == 0):
+        pass
 
-        # Scan for available BLE devices
-        if (do_scan):
-            print("Scanning devices for %s seconds..." % str(SCAN_TIMEOUT))
-            device_li = adapter.scan(timeout=SCAN_TIMEOUT)
-            i = 1
-            for d in device_li:
-                print("%s. %s -- %s" % (str(i), str(d["address"]), str(d["name"])))
-                i += 1
+    # try:
+        # # Connect to BLED112
+        # adapter.start()
 
-            # Check list size
-            if len(device_li) == 0:
-                print("No device found!")
-                return
+        # # Scan for available BLE devices
+        # if (do_scan):
+            # print("Scanning devices for %s seconds..." % str(SCAN_TIMEOUT))
+            # device_li = adapter.scan(timeout=SCAN_TIMEOUT)
+            # i = 1
+            # for d in device_li:
+                # print("%s. %s -- %s" % (str(i), str(d["address"]), str(d["name"])))
+                # i += 1
 
-        device_address = None
+            # # Check list size
+            # if len(device_li) == 0:
+                # print("No device found!")
+                # return
 
-        # Ask the user which device to connect to
-        if (manual_mode):
-            print("\nSelect which device to connect to (0 to exit):")
-            device_ind = None
-            while (device_ind == None):
-                user_in = input()
-                try:
-                    user_in = int(user_in)
-                    if (user_in == 0):
-                        return
-                    if (user_in < 0 or user_in > len(device_li)):
-                        raise
-                    device_ind = user_in - 1
-                except:
-                    print("Invalid input")
-            device_address = device_li[device_ind]["address"]
+        # device_address = None
+        
 
-        else:
-            if (avail_name):
-                found = False
-                error_name = False
-                error_address = False
-                for d in device_li:
-                    if (verify_mode):
-                        if (d["address"] == args.address[0] and d["name"] != args.name[0]):
-                            error_name = True
-                            break
-                        if (d["address"] != args.address[0] and d["name"] == args.name[0]):
-                            error_address = True
-                            break
-                    if (d["name"] == args.name[0] and ((not verify_mode) or (verify_mode and d["address"] == args.address[0]))):
-                        device_address = d["address"]
-                        found = True
-                        break
-                if (not found):
-                    print("Couldn't find the device")
-                    if (error_address):
-                        print("Warning: Found a device with that name but with a different address")
-                    if (error_name):
-                        print("Warning: Found a device with that address but with a different name")
-                    return
-            else:
-                device_address = args.address[0]
+        # # Ask the user which device to connect to
+        # if (manual_mode):
+            # print("\nSelect which device to connect to (0 to exit):")
+            # device_ind = None
+            # while (device_ind == None):
+                # user_in = input()
+                # try:
+                    # user_in = int(user_in)
+                    # if (user_in == 0):
+                        # return
+                    # if (user_in < 0 or user_in > len(device_li)):
+                        # raise
+                    # device_ind = user_in - 1
+                # except:
+                    # print("Invalid input")
+            # device_address = device_li[device_ind]["address"]
 
+        # else:
+            # if (avail_name):
+                # found = False
+                # error_name = False
+                # error_address = False
+                # for d in device_li:
+                    # if (verify_mode):
+                        # if (d["address"] == args.address[0] and d["name"] != args.name[0]):
+                            # error_name = True
+                            # break
+                        # if (d["address"] != args.address[0] and d["name"] == args.name[0]):
+                            # error_address = True
+                            # break
+                    # if (d["name"] == args.name[0] and ((not verify_mode) or (verify_mode and d["address"] == args.address[0]))):
+                        # device_address = d["address"]
+                        # found = True
+                        # break
+                # if (not found):
+                    # print("Couldn't find the device")
+                    # if (error_address):
+                        # print("Warning: Found a device with that name but with a different address")
+                    # if (error_name):
+                        # print("Warning: Found a device with that address but with a different name")
+                    # return
+            # else:
+                # device_address = args.address[0]
+    
+    else:        
         # Initialize the main window
         global root
         root = tk.Tk()
@@ -657,21 +630,21 @@ def main():
         my_widgets(root)
 
         # Connect to the device
-        print("\nConnecting to the selected device...")
-        device = adapter.connect(address=device_address)
-        print("Connected successfully!\n")
+        # print("\nConnecting to the selected device...")
+        # device = adapter.connect(address=device_address)
+        # print("Connected successfully!\n")
 
-        # Subscribe to the wanted characteristic data
-        print("Subscribing to the characteristic with UUID %s..." % MY_CHAR_UUID)
-        device.subscribe(MY_CHAR_UUID, callback=handle_my_char_data)
-        print("Subscribed to the characteristic successfully!\n")
+        # # Subscribe to the wanted characteristic data
+        # print("Subscribing to the characteristic with UUID %s..." % MY_CHAR_UUID)
+        # device.subscribe(MY_CHAR_UUID, callback=handle_my_char_data)
+        # print("Subscribed to the characteristic successfully!\n")
 
         # Run the GUI main loop
         root.mainloop()
-    finally:
-        if device != None:
-            device.disconnect()
-        adapter.stop()
+    # finally:
+        # if device != None:
+            # device.disconnect()
+        # adapter.stop()
 
 if __name__ == "__main__":
     main()
