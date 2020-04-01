@@ -42,33 +42,58 @@ inner_clicker = list()
 red_handle = list()
 reset_check = list()
 counter_entry = list()
+ignore_red_handle_button = None
+ignore_red_handle_checkbutton = None
+
+ignore_red_handle_state = False
 
 root = None
 
 device = None
-
-def button_callback():
-    threading.Thread(target=ignore_red_handle, daemon=True).start()
-
-def ignore_red_handle():
-    # print("Ignoring red handle")
-    val = None
-    for i in range(5):
-        try:
-            # with device._lock:
-            val = device.char_read(RED_HANDLE_CHAR_UUID)
-            print("Value = %s" % str(val))
-            break
-        except:
-            pass
-    if not val:
-        print("Couldn't read the characteristic!")
 
 def update_checkbox(checkbox, bool_value):
     if (bool_value):
         checkbox.select()
     else:
         checkbox.deselect()
+
+def button_callback():
+    threading.Thread(target=rw_red_handle, daemon=True).start()
+
+def rw_red_handle():
+    write_red_handle()
+    read_red_handle()
+
+def write_red_handle():
+    val = bool(ignore_red_handle_state)
+    is_fail = False
+    for i in range(5):
+        try:
+            device.char_write(RED_HANDLE_CHAR_UUID, bytes([int(not val)]), wait_for_response=True)
+            break
+        except:
+            is_fail = True
+            pass
+    if is_fail:
+        print("Couldn't write to the characteristic: %s" % str(RED_HANDLE_CHAR_UUID))
+
+def read_red_handle():
+    global ignore_red_handle_state
+    val = None
+    is_fail = False
+    for i in range(5):
+        try:
+            # with device._lock:
+            val = device.char_read(RED_HANDLE_CHAR_UUID)
+            update_checkbox(ignore_red_handle_checkbutton, val)
+            break
+        except:
+            is_fail = True
+            pass
+    if is_fail:
+        print("Couldn't read the characteristic: %s" % str(RED_HANDLE_CHAR_UUID))
+    else:
+        ignore_red_handle_state = bool(val[0])
 
 def handle_my_char_data(handle, value):
     """
@@ -77,7 +102,6 @@ def handle_my_char_data(handle, value):
     """
     print("Received data: %s" % hexlify(value))
 
-    # 
     digital = (int(value[1]) << 8) + int(value[0])
     analog = [(int(value[i + 1]) << 8) + int(value[i]) for i in range(2, 5 * 2 + 1, 2)]
     counter = (int(value[12]) << 8) + int(value[13]) # This value is big endian
@@ -93,6 +117,7 @@ def handle_my_char_data(handle, value):
     bool_clicker = bool((digital >> 2) & 0x0001)
     bool_reset = bool((digital >> 4) & 0x0001)
     bool_red_handle = bool((digital >> 7) & 0x0001)
+    bool_ignore_red_handle = ignore_red_handle_state
     int_outer_handle_channel1 = analog[1]
     int_outer_handle_channel2 = analog[2]
     int_inner_handle_channel1 = analog[0]
@@ -120,6 +145,7 @@ def handle_my_char_data(handle, value):
     checkbox_inner_clicker = inner_clicker
     checkbox_red_handle = red_handle
     checkbox_reset_check = reset_check
+    checkbox_ignore_red_handle = ignore_red_handle_checkbutton
     entry_counter = counter_entry
 
     progressbar_style_outer_handle_channel1.configure(
@@ -154,6 +180,7 @@ def handle_my_char_data(handle, value):
     update_checkbox(checkbox_inner_clicker, bool_clicker)
     update_checkbox(checkbox_red_handle, bool_red_handle)
     update_checkbox(checkbox_reset_check, bool_reset)
+    update_checkbox(checkbox_ignore_red_handle, bool_ignore_red_handle)
 
     entry_counter.delete(0, tk.END)
     entry_counter.insert(tk.END, "%d" % int_counter)
@@ -362,6 +389,18 @@ def my_widgets(frame):
         row=row,
         column=1
     )
+    # Add to the same row the "Ignore Red Handle" button
+    w = ttk.Button(
+        frame,
+        text="Ignore Red Handle",
+        command=button_callback
+    )
+    global ignore_red_handle_button
+    ignore_red_handle_button = w
+    w.grid(
+        row=row,
+        column=2,
+    )
 
     row += 1
 
@@ -386,17 +425,16 @@ def my_widgets(frame):
         row=row,
         column=1
     )
-
-    # Add to the same row the "Ignore Red Handle" button
-    ttk.Button(
+    # Add to the same row the red handle "ignore" state
+    w = tk.Checkbutton(
         frame,
-        text="Ignore Red Handle",
-        command=button_callback
-    ).grid(
+        state=tk.DISABLED
+    )
+    global ignore_red_handle_checkbutton
+    ignore_red_handle_checkbutton = w
+    w.grid(
         row=row,
-        column=2,
-        # sticky=tk.E,
-        # padx=20
+        column=2
     )
 
     row += 1
