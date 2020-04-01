@@ -4,6 +4,7 @@ import pygatt
 from binascii import hexlify
 import sys
 import argparse
+import threading
 
 import tkinter as tk
 from tkinter import ttk
@@ -18,6 +19,7 @@ elif platform.system() == "Windows":
 SCAN_TIMEOUT = 3
 
 MY_CHAR_UUID = "f0001143-0451-4000-b000-000000000000"
+RED_HANDLE_CHAR_UUID = "f0001141-0451-4000-b000-000000000000"
 
 OUTER_HANDLE_CHANNEL1_STYLE = "OuterHandleChannel1"
 OUTER_HANDLE_CHANNEL2_STYLE = "OuterHandleChannel2"
@@ -42,6 +44,25 @@ reset_check = list()
 counter_entry = list()
 
 root = None
+
+device = None
+
+def button_callback():
+    threading.Thread(target=ignore_red_handle, daemon=True).start()
+
+def ignore_red_handle():
+    # print("Ignoring red handle")
+    val = None
+    for i in range(5):
+        try:
+            # with device._lock:
+            val = device.char_read(RED_HANDLE_CHAR_UUID)
+            print("Value = %s" % str(val))
+            break
+        except:
+            pass
+    if not val:
+        print("Couldn't read the characteristic!")
 
 def update_checkbox(checkbox, bool_value):
     if (bool_value):
@@ -366,6 +387,18 @@ def my_widgets(frame):
         column=1
     )
 
+    # Add to the same row the "Ignore Red Handle" button
+    ttk.Button(
+        frame,
+        text="Ignore Red Handle",
+        command=button_callback
+    ).grid(
+        row=row,
+        column=2,
+        # sticky=tk.E,
+        # padx=20
+    )
+
     row += 1
 
     # Seperator
@@ -439,7 +472,7 @@ def main():
     elif BACKEND == "GATTTOOL":
         adapter = pygatt.GATTToolBackend() # GATTtool backend for Linux
 
-    device = None
+    global device
 
     try:
         # Connect to BLED112
