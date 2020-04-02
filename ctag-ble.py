@@ -4,6 +4,7 @@ import pygatt
 from binascii import hexlify
 import sys
 import argparse
+import threading
 
 import tkinter as tk
 from tkinter import ttk
@@ -21,9 +22,11 @@ prev_int_outer_handle_channel1 = 0
 red_handle_ignore_val = 0
 
 MY_CHAR_UUID = "f0001143-0451-4000-b000-000000000000"
+RED_HANDLE_CHAR_UUID = "f0001111-0451-4000-b000-000000000000"
 MSP_CHAR1_UUID = "f0001141-0451-4000-b000-000000000000"
 MSP_CHAR2_UUID = "f0001142-0451-4000-b000-000000000000"
 MSP_CHAR3_UUID = "f0001143-0451-4000-b000-000000000000"
+
 # device = None
 
 
@@ -50,14 +53,65 @@ reset_check = list()
 counter_entry = list()
 clicker_counter_entry = list()
 ignore_red = list()
+ignore_red_handle_button = None
+ignore_red_handle_checkbutton = None
+ignore_red_handle_state = False
 
 root = None
+
+device = None
 
 def update_checkbox(checkbox, bool_value):
     if (bool_value):
         checkbox.select()
     else:
         checkbox.deselect()
+    #print("update_checkbox: ", str(bool_value))
+
+def button_callback():
+    threading.Thread(target=rw_red_handle, daemon=True).start()
+
+def rw_red_handle():
+    write_red_handle()
+    read_red_handle()
+
+def write_red_handle():
+    # val = bool(ignore_red_handle_state)
+    val = bool(1)
+    is_fail = False
+    for i in range(5):
+        try:
+            # device.char_write(RED_HANDLE_CHAR_UUID, bytes([int(not val)]), wait_for_response=True)
+            
+            # there is no meaning to send '0' to "ignore red handle fault" since it is 
+            # only one direction workaround to hardware issue.
+            device.char_write(RED_HANDLE_CHAR_UUID, bytes([0x01]), wait_for_response=True)
+            break
+        except:
+            is_fail = True
+            pass
+    if is_fail:
+        print("Couldn't write to the characteristic: %s" % str(RED_HANDLE_CHAR_UUID))
+
+def read_red_handle():
+    global ignore_red_handle_state
+    val = None
+    is_fail = False
+    for i in range(5):
+        try:
+            # with device._lock:
+            val = device.char_read(RED_HANDLE_CHAR_UUID)
+            update_checkbox(ignore_red_handle_checkbutton, val)
+            print("read_red_handle: ", str(val))
+            break
+        except:
+            is_fail = True
+            pass
+    if is_fail:
+        print("Couldn't read the characteristic: %s" % str(RED_HANDLE_CHAR_UUID))
+    else:
+        ignore_red_handle_state = bool(val[0])
+
 
 def toggle_val(value):
     if (value):
@@ -147,6 +201,7 @@ def handle_my_char_data(handle, value):
     bool_clicker = bool((digital >> 2) & 0x0001)
     bool_reset = bool((digital >> 4) & 0x0001)
     bool_red_handle = bool((digital >> 7) & 0x0001)
+    bool_ignore_red_handle = ignore_red_handle_state
     int_outer_handle_channel1 = analog[1]
     int_outer_handle_channel2 = analog[2]
     int_inner_handle_channel1 = analog[0]
@@ -183,6 +238,7 @@ def handle_my_char_data(handle, value):
     checkbox_inner_clicker = inner_clicker
     checkbox_red_handle = red_handle
     checkbox_reset_check = reset_check
+    checkbox_ignore_red_handle = ignore_red_handle_checkbutton
     entry_counter = counter_entry
     entry_clicker_counter = clicker_counter_entry
 
@@ -218,6 +274,7 @@ def handle_my_char_data(handle, value):
     update_checkbox(checkbox_inner_clicker, bool_clicker)
     update_checkbox(checkbox_red_handle, bool_red_handle)
     update_checkbox(checkbox_reset_check, bool_reset)
+    update_checkbox(checkbox_ignore_red_handle, bool_ignore_red_handle)
 
     entry_counter.delete(0, tk.END)
     entry_counter.insert(tk.END, "%d" % int_counter)
@@ -487,10 +544,11 @@ def my_widgets(frame):
     w = tk.Button(
         frame,
         text ="send ignore",
-        command = ignoreCallBack
+        # command = ignoreCallBack
+        command = button_callback
     )
     global red_handle_ignore
-    red_handle_ignore = w
+    red_handle_ignore = w     # there is no meaning for the button object name, the callback is used
     w.grid(
         row=row,
         column=3
@@ -501,8 +559,10 @@ def my_widgets(frame):
         frame,
         state=tk.DISABLED
     )
-    global ignore_red
-    ignore_red = w
+    # global ignore_red
+    # ignore_red = w
+    global ignore_red_handle_checkbutton
+    ignore_red_handle_checkbutton = w
     w.grid(
         row=row,
         column=2
@@ -563,7 +623,7 @@ def init_parser():
     return parser
 
 def main():
-    global device
+    #global device
     # Parse the command line arguments
     parser = init_parser()
     args = parser.parse_args(sys.argv[1:])
@@ -582,7 +642,7 @@ def main():
     elif BACKEND == "GATTTOOL":
         adapter = pygatt.GATTToolBackend() # GATTtool backend for Linux
 
-    device = None
+    global device
 
     try:
         # Connect to BLED112
