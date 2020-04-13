@@ -20,6 +20,8 @@ SCAN_TIMEOUT = 3
 print_cntr = 0
 prev_int_outer_handle_channel1 = 0
 red_handle_ignore_val = 0
+prev_clicker_counter = 0
+clicker_counter = 0
 
 MY_CHAR_UUID = "f0001143-0451-4000-b000-000000000000"
 RED_HANDLE_CHAR_UUID = "f0001111-0451-4000-b000-000000000000"
@@ -168,11 +170,14 @@ def handle_my_char_data(handle, value):
     global print_cntr
     global prev_int_outer_handle_channel1
     global red_handle_ignore_val
+    global prev_clicker_counter
+    global clicker_counter
     
     # print("Received data: %s %s" % hexlify(value) str(print_cntr))
     if (print_cntr % 10 ) == 0:
         s = "Received data: " + str(hexlify(value)) + "  " + str(print_cntr)
         print(s)
+
     print_cntr += 1 
 
     # 
@@ -182,7 +187,19 @@ def handle_my_char_data(handle, value):
     # use only 8 bits from the MSP counter value 
     # ( leave hi nibble for something else: clicker_counter... )
     counter = int(value[13]) # use only 8 bits
-    clicker_counter = int(value[12]) # use only 8 bits
+    
+    # clicker_counter = int(value[12]) # use only 8 bits
+    # I need to keep the "counter" as 16 bit as it was for USB operation
+    # hense we utilize DigitalIO2 high nibble to count clicks.
+    # b'c1303201ba0cf204fc08dd0301a7'
+    #     ^-- 4 bits clicker_counter (in this case 3)
+    clicker_counter_4bits = ((int(value[1]) & 0xF0 ) >> 4)
+    if prev_clicker_counter != clicker_counter_4bits:
+        print("click")
+        clicker_counter += 1
+        # s = "clicker_counter: " + str(clicker_counter) + "    value[1]: " + str(value[1])
+        # print(s)
+        prev_clicker_counter = clicker_counter_4bits
     
     # print the "MSP Version" out of special info packet
     if (digital == 0x3101):
