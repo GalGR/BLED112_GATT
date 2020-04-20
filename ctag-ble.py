@@ -22,6 +22,7 @@ prev_int_outer_handle_channel1 = 0
 red_handle_ignore_val = 0
 prev_clicker_counter = 0
 clicker_counter = 0
+ctag_fault = 0
 
 MY_CHAR_UUID = "f0001143-0451-4000-b000-000000000000"
 RED_HANDLE_CHAR_UUID = "f0001111-0451-4000-b000-000000000000"
@@ -55,6 +56,7 @@ reset_check = list()
 counter_entry = list()
 clicker_counter_entry = list()
 ignore_red = list()
+fault_entry = list()
 ignore_red_handle_button = None
 ignore_red_handle_checkbutton = None
 ignore_red_handle_state = False
@@ -172,6 +174,7 @@ def handle_my_char_data(handle, value):
     global red_handle_ignore_val
     global prev_clicker_counter
     global clicker_counter
+    global ctag_fault
     
     # print("Received data: %s %s" % hexlify(value) str(print_cntr))
     if (print_cntr % 10 ) == 0:
@@ -189,23 +192,37 @@ def handle_my_char_data(handle, value):
     counter = int(value[13]) # use only 8 bits
     
     # clicker_counter = int(value[12]) # use only 8 bits
+    
     # I need to keep the "counter" as 16 bit as it was for USB operation
-    # hense we utilize DigitalIO2 high nibble to count clicks.
+    # hence we utilize DigitalIO2 high nibble to count clicks.
     # b'c1303201ba0cf204fc08dd0301a7'
     #     ^-- 4 bits clicker_counter (in this case 3)
     clicker_counter_4bits = ((int(value[1]) & 0xF0 ) >> 4)
-    if prev_clicker_counter != clicker_counter_4bits:
-        print("click")
-        clicker_counter += 1
-        # s = "clicker_counter: " + str(clicker_counter) + "    value[1]: " + str(value[1])
-        # print(s)
-        prev_clicker_counter = clicker_counter_4bits
     
     # print the "MSP Version" out of special info packet
     if (digital == 0x3101):
         if (analog[0] == 0x1965):
             s = 'MSP Version: ' + repr(analog[2]) + '.' + repr(analog[3]) + '.' + repr(analog[4])
             print(s)
+    else:
+        # extract byteErrorCode from data
+        ctag_fault = (int(value[1]) & 0xF )
+        # extract DataSend.ClickerCounter from data
+        if prev_clicker_counter != clicker_counter_4bits:
+            if ( clicker_counter_4bits > prev_clicker_counter ):
+                delta = clicker_counter_4bits - prev_clicker_counter
+            else:  # prev_clicker_counter > clicker_counter_4bits
+                # calc delta to 15
+                delta = 15 - prev_clicker_counter
+                delta += clicker_counter_4bits +1
+                # clicker_counter += 1
+                # s = "clicker_counter: " + str(clicker_counter) + "    value[1]: " + str(value[1])
+                # print(s)
+            clicker_counter += delta
+            print("click: %s" % str(delta))
+            print("\a")
+            prev_clicker_counter = clicker_counter_4bits
+    
 
     encoder1 = analog[3]
     encoder2 = analog[0]
@@ -225,6 +242,7 @@ def handle_my_char_data(handle, value):
     int_inner_handle_channel2 = analog[3]
     int_clicker = clicker_analog
     int_counter = counter
+    int_ctag_fault = ctag_fault
     int_clicker_counter = clicker_counter
     precentage_outer_handle_channel1 = int((int_outer_handle_channel1 / 4096) * 100)
     precentage_outer_handle_channel2 = int((int_outer_handle_channel2 / 4096) * 100)
@@ -258,7 +276,8 @@ def handle_my_char_data(handle, value):
     checkbox_ignore_red_handle = ignore_red_handle_checkbutton
     entry_counter = counter_entry
     entry_clicker_counter = clicker_counter_entry
-
+    entry_fault = fault_entry
+    
     progressbar_style_outer_handle_channel1.configure(
         OUTER_HANDLE_CHANNEL1_STYLE,
         text=("%d" % int_outer_handle_channel1)
@@ -298,6 +317,9 @@ def handle_my_char_data(handle, value):
 
     entry_clicker_counter.delete(0, tk.END)
     entry_clicker_counter.insert(tk.END, "%d" % int_clicker_counter)
+
+    entry_fault.delete(0, tk.END)
+    entry_fault.insert(tk.END, "%d" % int_ctag_fault)
 
     root.update()
 
@@ -593,7 +615,7 @@ def my_widgets(frame):
     # Counter
     ttk.Label(
         frame,
-        text="Counter"
+        text="Packets Counter:"
     ).grid(
         row=row,
         column=0,
@@ -614,6 +636,36 @@ def my_widgets(frame):
         columnspan=2,
         sticky=tk.W,
     )
+    
+    # C_TAG Fault indication
+    ttk.Label(
+        frame,
+        text="Fault indication:"
+    ).grid(
+        row=row,
+        column=1,
+        sticky=tk.E,
+    )
+    w = ttk.Entry(
+        frame,
+        width=20,
+    )
+    global fault_entry
+    fault_entry = w
+    w.grid(
+        padx=10,
+        pady=5,
+        row=row,
+        column=2,
+        columnspan=2,
+        sticky=tk.W,
+    )
+    
+    row += 1
+
+    # Seperator
+    row = my_seperator(frame, row)
+
 
 def init_parser():
     parser = argparse.ArgumentParser(
