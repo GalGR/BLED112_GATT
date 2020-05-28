@@ -5,6 +5,8 @@ from binascii import hexlify
 import sys
 import argparse
 import threading
+import multiprocessing as mp
+from time import sleep
 
 import tkinter as tk
 from tkinter import ttk
@@ -15,6 +17,26 @@ if platform.system() == "Linux":
     BACKEND = "GATTTOOL"
 elif platform.system() == "Windows":
     BACKEND = "BLED112"
+
+class function:
+    def __init__(self, target, args=list()):
+        self.target = target
+        self.args = args
+    def __call__(self):
+        self.target(*self.args)
+
+avail_address = False
+avail_name = False
+do_scan = False
+manual_mode = False
+verify_mode = False
+payload_emulate_mode = False
+
+d_gui_queue = None # Data queue to the GUI
+g_gui_queue = None # Update global variables of the GUI
+f_ble_queue = None # Function queue to the BLE
+f_gui_queue = None # Function queue to the GUI
+is_exit = None # Is the program ready to exit
 
 SCAN_TIMEOUT = 3
 print_cntr = 0
@@ -30,9 +52,6 @@ MSP_CHAR1_UUID = "f0001141-0451-4000-b000-000000000000"
 MSP_CHAR2_UUID = "f0001142-0451-4000-b000-000000000000"
 MSP_CHAR3_UUID = "f0001143-0451-4000-b000-000000000000"
 BATTERY_LEVEL_CHAR_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
-
-# device = None
-
 
 OUTER_HANDLE_CHANNEL1_STYLE = "OuterHandleChannel1"
 OUTER_HANDLE_CHANNEL2_STYLE = "OuterHandleChannel2"
@@ -71,6 +90,9 @@ root = None
 
 device = None
 
+def update_checkbox_string(checkbox_string, bool_value):
+    update_checkbox(globals()[checkbox_string], bool_value)
+
 def update_checkbox(checkbox, bool_value):
     if (bool_value):
         checkbox.select()
@@ -79,6 +101,9 @@ def update_checkbox(checkbox, bool_value):
     #print("update_checkbox: ", str(bool_value))
 
 def button_callback():
+    f_ble_queue.put_nowait(function(target=ble_ignore_red_handle))
+
+def ble_ignore_red_handle():
     threading.Thread(target=rw_red_handle, daemon=True).start()
 
 def rw_red_handle():
@@ -111,7 +136,7 @@ def read_red_handle():
         try:
             # with device._lock:
             val = device.char_read(RED_HANDLE_CHAR_UUID)
-            update_checkbox(ignore_red_handle_checkbutton, val)
+            f_gui_queue.put_nowait(function(target=update_checkbox_string, args=("ignore_red_handle_checkbutton", val)))
             print("read_red_handle: ", str(val))
             break
         except:
@@ -120,7 +145,7 @@ def read_red_handle():
     if is_fail:
         print("Couldn't read the characteristic: %s" % str(RED_HANDLE_CHAR_UUID))
     else:
-        ignore_red_handle_state = bool(val[0])
+        g_gui_queue.put_nowait(("ignore_red_handle_state", bool(val[0])))
 
 
 def toggle_val(value):
@@ -168,15 +193,53 @@ def ignoreCallBack():
    device.subscribe(MY_CHAR_UUID, callback=handle_my_char_data)
    print("Subscribe back to the characteristic successfully!\n")
 
-def handle_battery_level_char_data(handle, value):
-    global battery_level
-    battery_level = int(hexlify(value), 16)
+def ble_functions_loop(f_queue):
+    while True:
+        functor = f_queue.get()
+        functor()
 
-def handle_my_char_data(handle, value):
-    """
-    handle -- integer, characteristic read handle the data was received on
-    value -- bytearray, the data returned in the notification
-    """
+def gui_functions_loop(f_queue):
+    while True:
+        functor = f_queue.get()
+        functor()
+
+def gui_update_globals_loop(g_queue):
+    while True:
+        var_str, val = g_queue.get()
+        globals()[var_str] = val
+
+def gui_loop(queue):
+    while True:
+        # Read the packets sent from the BLE
+        ignored = 0
+        my_char, battery_level = queue.get()
+        digital, analog, counter = handle_data(my_char, battery_level)
+        while True:
+            try:
+                my_char, battery_level = queue.get_nowait()
+                digital, analog, counter = handle_data(my_char, battery_level)
+                ignored += 1
+            except:
+                break
+        if ignored != 0:
+            print("GUI ignored %d packets" % ignored)
+
+        update_gui(digital, analog, counter, battery_level)
+
+def handle_data(my_char, battery_level):
+    value = my_char
+
+    digital = (int(value[1]) << 8) + int(value[0])
+    analog = [(int(value[i + 1]) << 8) + int(value[i]) for i in range(2, 5 * 2 + 1, 2)]
+    # counter = (int(value[12]) << 8) + int(value[13]) # This value is big endian
+    # use only 8 bits from the MSP counter value 
+    # ( leave hi nibble for something else: clicker_counter... )
+    counter = int(value[13]) # use only 8 bits
+    
+    # clicker_counter = int(value[12]) # use only 8 bits
+
+    int_outer_handle_channel1 = analog[1]
+
     global print_cntr
     global prev_int_outer_handle_channel1
     global red_handle_ignore_val
@@ -189,18 +252,8 @@ def handle_my_char_data(handle, value):
         s = "Received data: " + str(hexlify(value)) + "  " + str(print_cntr)
         print(s)
 
-    print_cntr += 1 
+    print_cntr += 1
 
-    # 
-    digital = (int(value[1]) << 8) + int(value[0])
-    analog = [(int(value[i + 1]) << 8) + int(value[i]) for i in range(2, 5 * 2 + 1, 2)]
-    # counter = (int(value[12]) << 8) + int(value[13]) # This value is big endian
-    # use only 8 bits from the MSP counter value 
-    # ( leave hi nibble for something else: clicker_counter... )
-    counter = int(value[13]) # use only 8 bits
-    
-    # clicker_counter = int(value[12]) # use only 8 bits
-    
     # I need to keep the "counter" as 16 bit as it was for USB operation
     # hence we utilize DigitalIO2 high nibble to count clicks.
     # b'c1303201ba0cf204fc08dd0301a7'
@@ -230,8 +283,18 @@ def handle_my_char_data(handle, value):
             print("click: %s" % str(delta))
             print("\a")
             prev_clicker_counter = clicker_counter_4bits
-    
 
+    # calc delta once every second
+    if (print_cntr % 5 ) == 0:
+        Delta = -(prev_int_outer_handle_channel1 - int_outer_handle_channel1)
+        if( Delta > 2 or Delta < -2 ):
+            s = 'Delta: ' + repr(Delta) 
+            print( s )
+        prev_int_outer_handle_channel1 = int_outer_handle_channel1
+
+    return (digital, analog, counter)
+
+def update_gui(digital, analog, counter, battery_level):
     encoder1 = analog[3]
     encoder2 = analog[0]
     encoder3 = analog[1]
@@ -258,14 +321,6 @@ def handle_my_char_data(handle, value):
     precentage_inner_handle_channel2 = int((int_inner_handle_channel2 / 4096) * 100)
     precentage_clicker = int((int_clicker / 4096) * 100)
     precentage_battery_level = battery_level
-    
-    # calc delta once every second 
-    if (print_cntr % 5 ) == 0:
-        Delta = -(prev_int_outer_handle_channel1 - int_outer_handle_channel1)
-        if( Delta > 2 or Delta < -2 ):
-            s = 'Delta: ' + repr(Delta) 
-            print( s )
-        prev_int_outer_handle_channel1 = int_outer_handle_channel1
 
     progressbar_style_outer_handle_channel1 = progressbar_styles[0]
     progressbar_style_outer_handle_channel2 = progressbar_styles[1]
@@ -338,6 +393,21 @@ def handle_my_char_data(handle, value):
     entry_fault.insert(tk.END, "%d" % int_ctag_fault)
 
     root.update()
+
+def handle_battery_level_char_data(handle, value):
+    global battery_level
+    battery_level = int(hexlify(value), 16)
+
+def handle_my_char_data(handle, value):
+    """
+    handle -- integer, characteristic read handle the data was received on
+    value -- bytearray, the data returned in the notification
+    """
+    try:
+        d_gui_queue.put_nowait((value, battery_level))
+    except:
+        print("Error: The queue is full!")
+        exit(1)
 
 PROGRESS_BAR_LEN = 300
 BATTERY_PROGRESS_BAR_LEN = 900
@@ -742,21 +812,10 @@ def debug_payload_emulation():
     while True:
         payload = urandom(14)
         handle_my_char_data(None, payload)
-        sleep(0.02)
+        sleep(0.01)
 
-def main():
-    #global device
-    # Parse the command line arguments
-    parser = init_parser()
-    args = parser.parse_args(sys.argv[1:])
-
-    # Initialize the flags according from the command line arguments
-    avail_address = args.address != None
-    avail_name = args.name != None
-    do_scan = (not avail_address) or avail_name
-    manual_mode = (not avail_address) and (not avail_name)
-    verify_mode = avail_address and avail_name
-    payload_emulate_mode = args.debug
+def main_ble():
+    sys.stdin = open(0)
 
     # Initialize the adapter according to the backend used
     adapter = None
@@ -831,14 +890,6 @@ def main():
             else:
                 device_address = args.address[0]
 
-        # Initialize the main window
-        global root
-        root = tk.Tk()
-        root.title("C-TAG BLE")
-
-        # Initialize the GUI widgets
-        my_widgets(root)
-
         # Connect to the device
         print("\nConnecting to the selected device...")
         device = adapter.connect(address=device_address)
@@ -851,23 +902,84 @@ def main():
         # Subscribe to the battery level characteristic
         device.subscribe(BATTERY_LEVEL_CHAR_UUID, callback=handle_battery_level_char_data)
 
-
         # Subscribe to the wanted characteristic data
         print("Subscribing to the characteristic with UUID %s..." % MY_CHAR_UUID)
         device.subscribe(MY_CHAR_UUID, callback=handle_my_char_data)
         print("Subscribed to the characteristic successfully!\n")
 
-        # DEBUG -- emulate the payload callback
-        if payload_emulate_mode:
-            from threading import Thread
-            Thread(target=debug_payload_emulation, daemon=True).start()
+        # Signal the GUI process that the BLE is ready
+        d_gui_queue.put(object()) # Sending an empty object
 
-        # Run the GUI main loop
-        root.mainloop()
+        # Thread to execute function requests from the GUI
+        threading.Thread(target=ble_functions_loop, args=(f_ble_queue,), daemon=True).start()
+
+        # Should the process exit
+        while is_exit.value == 0:
+            sleep(0.1) # Sleep for 100 milliseconds
+
     finally:
         if device != None:
             device.disconnect()
         adapter.stop()
 
+    is_exit.value = 1 # Signal the other process to exit
+
+def main_gui_is_exit():
+    # Should the process exit
+    while is_exit.value == 0:
+        sleep(0.1) # Sleep for 100 milliseconds
+
+def main_gui():
+    # Initialize the main window
+    global root
+    root = tk.Tk()
+    root.title("C-TAG BLE")
+
+    # Initialize the GUI widgets
+    my_widgets(root)
+
+    # Wait for the BLE process
+    d_gui_queue.get() # Waiting for an empty object
+
+    # Thread that updates the GUI from the BLE updates
+    threading.Thread(target=gui_loop, args=(d_gui_queue,), daemon=True).start()
+
+    # Thread to execute function requests from the BLE
+    threading.Thread(target=gui_functions_loop, args=(f_gui_queue,), daemon=True).start()
+
+    # Thread to update global variables of the GUI from the BLE
+    threading.Thread(target=gui_update_globals_loop, args=(g_gui_queue,), daemon=True).start()
+
+    # Thread to check if is_exit is true, and if so quit TkInter
+    threading.Thread(target=main_gui_is_exit, daemon=True).start()
+
+    # Run the GUI main loop
+    root.mainloop()
+
+    is_exit.value = 1 # Signal the other process to exit
+
 if __name__ == "__main__":
-    main()
+    # Parse the command line arguments
+    parser = init_parser()
+    args = parser.parse_args(sys.argv[1:])
+
+    # Initialize the flags according from the command line arguments
+    # This code is in global scope, no need to use global keyword on these variables
+    avail_address = args.address != None
+    avail_name = args.name != None
+    do_scan = (not avail_address) or avail_name
+    manual_mode = (not avail_address) and (not avail_name)
+    verify_mode = avail_address and avail_name
+    payload_emulate_mode = args.debug
+
+    # Processes share initial global variables state
+    mp.set_start_method('fork')
+    d_gui_queue = mp.Queue() # Data queue to the GUI
+    g_gui_queue = mp.Queue() # Update global variables of the GUI
+    f_ble_queue = mp.Queue() # Function queue to the BLE
+    f_gui_queue = mp.Queue() # Function queue to the GUI
+    is_exit = mp.Value('b', 0)
+    proc_ble = mp.Process(target=main_ble)
+    proc_ble.start()
+    main_gui()
+    proc_ble.join()
