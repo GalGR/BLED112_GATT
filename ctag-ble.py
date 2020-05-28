@@ -597,15 +597,12 @@ def my_widgets(frame):
     )
 # B = tkinter.Button(top, text ="Hello", command = ignoreCallBack)
     
-    w = tk.Button(
+    tk.Button(
         frame,
         text ="send ignore",
         # command = ignoreCallBack
         command = button_callback
-    )
-    global red_handle_ignore
-    red_handle_ignore = w     # there is no meaning for the button object name, the callback is used
-    w.grid(
+    ).grid(
         row=row,
         column=3
     )
