@@ -25,6 +25,7 @@ class function:
     def __call__(self):
         self.target(*self.args)
 
+args = None
 avail_address = False
 avail_name = False
 do_scan = False
@@ -814,7 +815,10 @@ def debug_payload_emulation():
         handle_my_char_data(None, payload)
         sleep(0.01)
 
-def main_ble():
+def main_ble(global_vars):
+    for var_str, val in global_vars.items():
+        globals()[var_str] = val
+
     sys.stdin = open(0)
 
     # Initialize the adapter according to the backend used
@@ -917,16 +921,21 @@ def main_ble():
         while is_exit.value == 0:
             sleep(0.1) # Sleep for 100 milliseconds
 
+    except:
+        print(sys.exc_info())
     finally:
         if device != None:
             device.disconnect()
         adapter.stop()
 
     is_exit.value = 1 # Signal the other process to exit
+    d_gui_queue.put_nowait(object())
 
 def main_gui_is_exit():
     # Should the process exit
-    while is_exit.value == 0:
+    while True:
+        if is_exit.value != 0:
+            root.quit()
         sleep(0.1) # Sleep for 100 milliseconds
 
 def main_gui():
@@ -959,12 +968,12 @@ def main_gui():
     is_exit.value = 1 # Signal the other process to exit
 
 if __name__ == "__main__":
+    # This code is in global scope, no need to use global keyword on these variables
     # Parse the command line arguments
     parser = init_parser()
     args = parser.parse_args(sys.argv[1:])
 
     # Initialize the flags according from the command line arguments
-    # This code is in global scope, no need to use global keyword on these variables
     avail_address = args.address != None
     avail_name = args.name != None
     do_scan = (not avail_address) or avail_name
@@ -973,13 +982,26 @@ if __name__ == "__main__":
     payload_emulate_mode = args.debug
 
     # Processes share initial global variables state
-    mp.set_start_method('fork')
+    mp.set_start_method('spawn') # Windows doesn't support 'fork' method
     d_gui_queue = mp.Queue() # Data queue to the GUI
     g_gui_queue = mp.Queue() # Update global variables of the GUI
     f_ble_queue = mp.Queue() # Function queue to the BLE
     f_gui_queue = mp.Queue() # Function queue to the GUI
     is_exit = mp.Value('b', 0)
-    proc_ble = mp.Process(target=main_ble)
+    proc_ble = mp.Process(target=main_ble, args=({
+        "args": args,
+        "avail_address": avail_address,
+        "avail_name": avail_name,
+        "do_scan": do_scan,
+        "manual_mode": manual_mode,
+        "verify_mode": verify_mode,
+        "payload_emulate_mode": payload_emulate_mode,
+        "d_gui_queue": d_gui_queue,
+        "g_gui_queue": g_gui_queue,
+        "f_ble_queue": f_ble_queue,
+        "f_gui_queue": f_gui_queue,
+        "is_exit": is_exit
+    },))
     proc_ble.start()
     main_gui()
     proc_ble.join()
